@@ -88,7 +88,7 @@ struct ROSBAG_DECL PlayerOptions
     bool     has_duration;
     float    duration;
     bool     keep_alive;
-    bool     wait_for_subscribers;
+    int      wait_for_subscribers;
     ros::Duration skip_empty;
 
     std::vector<std::string> bags;
@@ -178,7 +178,7 @@ private:
 
     void printTime();
 
-    void waitForSubscribers() const;
+    void waitForSubscribers(unsigned int n) const;
 
 
 private:

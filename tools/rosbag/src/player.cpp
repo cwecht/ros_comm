@@ -87,7 +87,7 @@ PlayerOptions::PlayerOptions() :
     has_duration(false),
     duration(0.0f),
     keep_alive(false),
-    wait_for_subscribers(false),
+    wait_for_subscribers(0),
     skip_empty(ros::DURATION_MAX)
 {
 }
@@ -214,7 +214,7 @@ void Player::publish() {
 
     if (options_.wait_for_subscribers)
     {
-        waitForSubscribers();
+        waitForSubscribers(options_.wait_for_subscribers);
     }
 
     while (true) {
@@ -284,14 +284,14 @@ void Player::printTime()
     }
 }
 
-void Player::waitForSubscribers() const
+void Player::waitForSubscribers(unsigned int n) const
 {
     bool all_topics_subscribed = false;
     std::cout << "Waiting for subscribers." << std::endl;
     while (!all_topics_subscribed) {
         all_topics_subscribed = true;
         foreach(const PublisherMap::value_type& pub, publishers_) {
-            all_topics_subscribed &= pub.second.getNumSubscribers() > 0;
+            all_topics_subscribed &= pub.second.getNumSubscribers() >= n;
         }
         ros::Duration(0.1).sleep();
     }
