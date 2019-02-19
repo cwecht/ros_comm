@@ -53,8 +53,8 @@ static bool g_lazy = false;
 static bool g_latch = false;
 static bool g_advertised = false;
 static string g_output_topic;
-static ros::Publisher g_pub;
-static ros::Publisher g_pub_selected;
+static ros::Publisher *g_pub = NULL;
+static ros::Publisher *g_pub_selected = NULL;
 
 struct sub_info_t
 {
@@ -120,7 +120,7 @@ bool sel_srv_cb( topic_tools::MuxSelect::Request  &req,
         ROS_INFO("mux selected input: [%s]", it->topic_name.c_str());
         ret = true;
         
-        if (!g_selected->sub && (!g_advertised || (g_advertised && g_pub.getNumSubscribers()))) {
+        if (!g_selected->sub && (!g_advertised || (g_advertised && g_pub->getNumSubscribers()))) {
           g_selected->sub = new ros::Subscriber(g_node->subscribe<ShapeShifter>(g_selected->topic_name, 10, boost::bind(in_cb, _1, g_selected->msg)));
         }
       }
@@ -131,7 +131,7 @@ bool sel_srv_cb( topic_tools::MuxSelect::Request  &req,
   {
     std_msgs::String t;
     t.data = req.topic;
-    g_pub_selected.publish(t);
+    g_pub_selected->publish(t);
   }
 
   return ret;
@@ -151,7 +151,7 @@ void in_cb(const boost::shared_ptr<ShapeShifter const>& msg,
   if (!g_advertised)
   {
     ROS_INFO("advertising");
-    g_pub = msg->advertise(*g_node, g_output_topic, 10, g_latch, conn_cb);
+    *g_pub = msg->advertise(*g_node, g_output_topic, 10, g_latch, conn_cb);
     g_advertised = true;
     
     // If lazy, unregister from all but the selected topic
@@ -172,14 +172,14 @@ void in_cb(const boost::shared_ptr<ShapeShifter const>& msg,
     return;
   
   // If we're in lazy subscribe mode, and nobody's listening, then unsubscribe
-  if (g_lazy && !g_pub.getNumSubscribers() && g_selected != g_subs.end()) {
+  if (g_lazy && !g_pub->getNumSubscribers() && g_selected != g_subs.end()) {
     ROS_INFO("lazy mode; unsubscribing");
     g_selected->sub->shutdown();
     delete g_selected->sub;
     g_selected->sub = NULL;
   }
   else
-    g_pub.publish(msg);
+    g_pub->publish(msg);
 }
 
 bool list_topic_cb(topic_tools::MuxList::Request& req,
@@ -308,7 +308,11 @@ int main(int argc, char **argv)
   pnh.getParam("latch", g_latch);
 
   // Latched publisher for selected input topic name
-  g_pub_selected = mux_nh.advertise<std_msgs::String>(string("selected"), 1, true);
+  ros::Publisher pub_selected = mux_nh.advertise<std_msgs::String>(string("selected"), 1, true);
+  g_pub_selected = &pub_selected;
+
+  ros::Publisher pub;
+  g_pub = &pub;
 
   for (size_t i = 0; i < topics.size(); i++)
   {
@@ -357,7 +361,7 @@ int main(int argc, char **argv)
       t.data = g_none_topic;
     }
   }
-  g_pub_selected.publish(t);
+  g_pub_selected->publish(t);
 
   // Backward compatibility
   ros::ServiceServer ss = n.advertiseService(g_output_topic + string("_select"), sel_srv_cb_dep);
