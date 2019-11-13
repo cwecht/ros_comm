@@ -74,7 +74,7 @@ class ROSLaunchParent(object):
     """
 
     def __init__(self, run_id, roslaunch_files, is_core=False, port=None, local_only=False, process_listeners=None,
-            verbose=False, force_screen=False, force_log=False, is_rostest=False, roslaunch_strs=None, num_workers=NUM_WORKERS, timeout=None, master_logger_level=False, show_summary=True,
+            verbose=False, force_screen=False, force_log=False, is_rostest=False, roslaunch_strs=None, num_workers=NUM_WORKERS, timeout=None, master_logger_level=False, show_summary=True, force_required=False,
                  sigint_timeout=DEFAULT_TIMEOUT_SIGINT, sigterm_timeout=DEFAULT_TIMEOUT_SIGTERM):
         """
         @param run_id: UUID of roslaunch session
@@ -109,16 +109,18 @@ class ROSLaunchParent(object):
         @throws RLException
         @param master_logger_level: Specify roscore's rosmaster.master logger level, use default if it is False.
         @type master_logger_level: str or False
+        @param force_required: (optional) whether to make all nodes required
+        @type force_required: boolean
         @param sigint_timeout: The SIGINT timeout used when killing nodes (in seconds).
-        @type sigint_timeout: int
+        @type sigint_timeout: float
         @param sigterm_timeout: The SIGTERM timeout used when killing nodes if SIGINT does not stop the node (in seconds).
-        @type sigterm_timeout: int
+        @type sigterm_timeout: float
         """
-
+        
         self.logger = logging.getLogger('roslaunch.parent')
         self.run_id = run_id
         self.process_listeners = process_listeners
-
+        
         self.roslaunch_files = roslaunch_files
         self.roslaunch_strs = roslaunch_strs
         self.is_core = is_core
@@ -138,6 +140,7 @@ class ROSLaunchParent(object):
         # allow alternate config loaders to be passed in.
         self.force_screen = force_screen
         self.force_log = force_log
+        self.force_required = force_required
         
         # flag to prevent multiple shutdown attempts
         self._shutting_down = False
@@ -155,6 +158,12 @@ class ROSLaunchParent(object):
         if self.force_log:
             for n in self.config.nodes:
                 n.output = 'log'
+        if self.force_required:
+            for n in self.config.nodes:
+                n.required = True
+                if n.respawn and n.required:
+                  raise ValueError("respawn and required cannot both be set to true")
+
 
     def _start_pm(self):
         """
