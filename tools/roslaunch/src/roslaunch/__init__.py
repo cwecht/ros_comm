@@ -141,6 +141,9 @@ def _get_optparse():
     parser.add_option("--screen",
                       dest="force_screen", default=False, action="store_true",
                       help="Force output of all local nodes to screen")
+    parser.add_option("--required",
+                      dest="force_required", default=False, action="store_true",
+                      help="Force all nodes to be required")
     parser.add_option("--log",
                       dest="force_log", default=False, action="store_true",
                       help="Force output of all local nodes to log")
@@ -336,7 +339,9 @@ def main(argv=sys.argv):
                     num_workers=options.num_workers, timeout=options.timeout,
                     master_logger_level=options.master_logger_level,
                     show_summary=not options.no_summary,
-                    sigint_timeout=options.sigint_timeout, sigterm_timeout=options.sigterm_timeout)
+                    force_required=options.force_required,
+                    sigint_timeout=options.sigint_timeout,
+                    sigterm_timeout=options.sigterm_timeout)
             p.start()
             p.spin()
 

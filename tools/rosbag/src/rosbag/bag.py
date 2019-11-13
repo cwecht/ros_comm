@@ -50,8 +50,9 @@ import threading
 import time
 import yaml
 
-from Crypto import Random
-from Crypto.Cipher import AES
+from Cryptodome.Cipher import AES
+from Cryptodome.Random import get_random_bytes
+
 import gnupg
 
 try:
@@ -79,8 +80,11 @@ class ROSBagException(Exception):
     """
     Base class for exceptions in rosbag.
     """
-    def __init__(self, value):
+    def __init__(self, value=None):
         self.value = value
+        #fix for #1209. needed in Python 2.7.
+        # For details: https://stackoverflow.com/questions/41808912/cannot-unpickle-exception-subclass
+        self.args = (value,)
 
     def __str__(self):
         return self.value
@@ -96,7 +100,8 @@ class ROSBagUnindexedException(ROSBagException):
     """
     Exception for unindexed bags.
     """
-    def __init__(self):
+    def __init__(self, *args):
+        #*args needed for #1209
         ROSBagException.__init__(self, 'Unindexed bag')
 
 class ROSBagEncryptNotSupportedException(ROSBagException):
@@ -221,7 +226,7 @@ class _ROSBagAesCbcEncryptor(_ROSBagEncryptor):
         f.seek(chunk_data_pos)
         chunk = _read(f, chunk_size)
         # Encrypt chunk
-        iv = Random.new().read(AES.block_size)
+        iv = get_random_bytes(AES.block_size)
         f.seek(chunk_data_pos)
         f.write(iv)
         cipher = AES.new(self._symmetric_key, AES.MODE_CBC, iv)
@@ -268,7 +273,7 @@ class _ROSBagAesCbcEncryptor(_ROSBagEncryptor):
         @raise ROSBagFormatException: if GPG key user is not found in header
         """
         try:
-            self._encrypted_symmetric_key = _read_str_field(header, self._ENCRYPTED_KEY_FIELD_NAME)
+            self._encrypted_symmetric_key = _read_bytes_field(header, self._ENCRYPTED_KEY_FIELD_NAME)
         except ROSBagFormatException:
             raise ROSBagFormatException('Encrypted symmetric key is not found in header')
         try:
@@ -299,7 +304,7 @@ class _ROSBagAesCbcEncryptor(_ROSBagEncryptor):
                 v = v.encode()
             header_str += _pack_uint32(len(k) + 1 + len(v)) + k + equal + v
 
-        iv = Random.new().read(AES.block_size)
+        iv = get_random_bytes(AES.block_size)
         enc_str = iv
         cipher = AES.new(self._symmetric_key, AES.MODE_CBC, iv)
         enc_str += cipher.encrypt(_add_padding(header_str))
@@ -345,7 +350,7 @@ class _ROSBagAesCbcEncryptor(_ROSBagEncryptor):
     def _build_symmetric_key(self):
         if not self._gpg_key_user:
             return
-        self._symmetric_key = Random.new().read(AES.block_size)
+        self._symmetric_key = get_random_bytes(AES.block_size)
         self._encrypted_symmetric_key = _encrypt_string_gpg(self._gpg_key_user, self._symmetric_key)
 
     def _decrypt_encrypted_header(self, f):
@@ -366,9 +371,10 @@ class _ROSBagAesCbcEncryptor(_ROSBagEncryptor):
         header = cipher.decrypt(encrypted_header)
         return _remove_padding(header)
 
-def _add_padding(input_str):
+def _add_padding(input_bytes):
     # Add PKCS#7 padding to input string
-    return input_str + (AES.block_size - len(input_str) % AES.block_size) * chr(AES.block_size - len(input_str) % AES.block_size)
+    padding_num = AES.block_size - len(input_bytes) % AES.block_size
+    return input_bytes + bytes((padding_num,) * padding_num)
 
 def _remove_padding(input_str):
     # Remove PKCS#7 padding from input string
@@ -386,7 +392,7 @@ def _decrypt_string_gpg(input):
     dec_data = gpg.decrypt(input, passphrase='clearpath')
     if not dec_data.ok:
         raise ROSBagEncryptException('Failed to decrypt bag: {}.  Have you installed a required private key?'.format(dec_data.status))
-    return str(dec_data)
+    return dec_data.data
 
 class Bag(object):
     """
@@ -1044,8 +1050,11 @@ class Bag(object):
 
                     msg_count = 0
                     for connection in connections:
-                        for chunk in self._chunks:
-                            msg_count += chunk.connection_counts.get(connection.id, 0)
+                        if self._chunks:
+                            for chunk in self._chunks:
+                                msg_count += chunk.connection_counts.get(connection.id, 0)
+                        else:
+                            msg_count += len(self._connection_indexes.get(connection.id, []))
                     topic_msg_counts[topic] = msg_count
 
                     if self._connection_indexes_read:
@@ -1243,7 +1252,7 @@ class Bag(object):
                         else:
                            setattr(self, a, DictObject(b) if isinstance(b, dict) else b)
 
-            obj = DictObject(yaml.load(s))
+            obj = DictObject(yaml.safe_load(s))
             try:
                 val = eval('obj.' + key)
             except Exception as ex:
@@ -1916,6 +1925,7 @@ def _read_uint32(f): return _unpack_uint32(f.read(4))
 def _read_uint64(f): return _unpack_uint64(f.read(8))
 def _read_time  (f): return _unpack_time  (f.read(8))
 
+def _decode_bytes(v):  return v
 def _decode_str(v):    return v if type(v) is str else v.decode()
 def _unpack_uint8(v):  return struct.unpack('<B', v)[0]
 def _unpack_uint32(v): return struct.unpack('<L', v)[0]
@@ -1965,6 +1975,7 @@ def _read_field(header, field, unpack_fn):
     
     return value
 
+def _read_bytes_field (header, field): return _read_field(header, field, _decode_bytes)
 def _read_str_field   (header, field): return _read_field(header, field, _decode_str)
 def _read_uint8_field (header, field): return _read_field(header, field, _unpack_uint8)
 def _read_uint32_field(header, field): return _read_field(header, field, _unpack_uint32)

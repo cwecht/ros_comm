@@ -77,13 +77,13 @@ def create_master_process(run_id, type_, ros_root, port, num_workers=NUM_WORKERS
     @type  num_workers: int
     @param timeout: socket timeout for connections.
     @type  timeout: float
+    @raise RLException: if type_ or port is invalid, or sigint_timeout or sigterm_timeout are nonpositive
     @param master_logger_level: rosmaster.master logger debug level
     @type  master_logger_level=: str or False
     @param sigint_timeout: The SIGINT timeout used when killing nodes (in seconds).
-    @type sigint_timeout: int
+    @type sigint_timeout: float
     @param sigterm_timeout: The SIGTERM timeout used when killing nodes if SIGINT does not stop the node (in seconds).
-    @type sigterm_timeout: int
-    @raise RLException: if type_ or port is invalid
+    @type sigterm_timeout: float
     """
     if port < 1 or port > 65535:
         raise RLException("invalid port assignment: %s"%port)
@@ -119,9 +119,9 @@ def create_node_process(run_id, node, master_uri, sigint_timeout=DEFAULT_TIMEOUT
     @param master_uri: API URI for master node
     @type  master_uri: str
     @param sigint_timeout: The SIGINT timeout used when killing nodes (in seconds).
-    @type sigint_timeout: int
+    @type sigint_timeout: float
     @param sigterm_timeout: The SIGTERM timeout used when killing nodes if SIGINT does not stop the node (in seconds).
-    @type sigterm_timeout: int
+    @type sigterm_timeout: float
     @return: local process instance
     @rtype: L{LocalProcess}
     @raise NodeParamsException: If the node's parameters are improperly specific
@@ -194,9 +194,9 @@ class LocalProcess(Process):
         @param is_node: (optional) if True, process is ROS node and accepts ROS node command-line arguments. Default: True
         @type  is_node: False
         @param sigint_timeout: The SIGINT timeout used when killing nodes (in seconds).
-        @type sigint_timeout: int
+        @type sigint_timeout: float
         @param sigterm_timeout: The SIGTERM timeout used when killing nodes if SIGINT does not stop the node (in seconds).
-        @type sigterm_timeout: int
+        @type sigterm_timeout: float
         """    
         super(LocalProcess, self).__init__(package, name, args, env,
                 respawn, respawn_delay, required)
@@ -493,49 +493,22 @@ executable permission. This is often caused by a bad launch-prefix."""%(e.strerr
         _logger.info("process[%s]: killing os process/subprocesses with pid[%s]", self.name, pid)
         # windows has no group id's :(
         try:
-            # Start with SIGINT and escalate from there.
-            _logger.info("[%s] sending SIGINT to pgid [%s]", self.name, pid)
-            os.kill(pid, signal.SIGINT)
-            _logger.info("[%s] sent SIGINT to pgid [%s]", self.name, pid)
+            _logger.info("[%s] running taskkill pid tree [%s]", self.name, pid)
+            subprocess.call(['taskkill', '/F', '/T', '/PID', str(pid)])
+            _logger.info("[%s] run taskkill pid tree [%s]", self.name, pid)
             timeout_t = time.time() + self.sigint_timeout
             retcode = self.popen.poll()
             while time.time() < timeout_t and retcode is None:
                 time.sleep(0.1)
                 retcode = self.popen.poll()
-            # Escalate non-responsive process
             if retcode is None:
-                printerrlog("[%s] escalating to SIGTERM"%self.name)
-                timeout_t = time.time() + self.sigterm_timeout
-                os.killpg(pid, signal.SIGTERM)
-                _logger.info("[%s] sent SIGTERM to pid [%s]"%(self.name, pid))
-                retcode = self.popen.poll()
-                while time.time() < timeout_t and retcode is None:
-                    time.sleep(0.2)
-                    _logger.debug('poll for retcode')
-                    retcode = self.popen.poll()
-                if retcode is None:
-                    printerrlog("[%s] escalating to SIGKILL"%self.name)
-                    errors.append("process[%s, pid %s]: required SIGKILL. May still be running."%(self.name, pid))
-                    try:
-                        os.killpg(pid, signal.SIGKILL)
-                        _logger.info("[%s] sent SIGKILL to pid [%s]"%(self.name, pid))
-                        # #2096: don't block on SIGKILL, because this results in more orphaned processes overall
-                        #self.popen.wait()
-                        #os.wait()
-                        _logger.info("process[%s]: sent SIGKILL", self.name)
-                    except OSError as e:
-                        if e.args[0] == 3:
-                            printerrlog("no [%s] process with pid [%s]"%(self.name, pid))
-                        else:
-                            printerrlog("errors shutting down [%s], see log for details"%self.name)
-                            _logger.error(traceback.format_exc())
-                else:
-                    _logger.info("process[%s]: SIGTERM killed with return value %s", self.name, retcode)
+                printerrlog("errors shutting down [%s], see log for details"%self.name)
+                _logger.error("errors shutting down [%s], see log for details"%self.name)
             else:
                 _logger.info("process[%s]: SIGINT killed with return value %s", self.name, retcode)
         finally:
             self.popen = None
-			
+
     def stop(self, errors=None):
         """
         Stop the process. Record any significant error messages in the errors parameter

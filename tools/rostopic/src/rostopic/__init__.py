@@ -1192,11 +1192,11 @@ def _rostopic_list_group_by_host(master, pubs, subs):
                 if not puri.hostname in tmap:
                     tmap[puri.hostname] = []
                 # recreate the system state data structure, but for a single host
-                matches = [l for x, l in tmap[puri.hostname] if x == topic]
+                matches = [l for x, _, l in tmap[puri.hostname] if x == topic]
                 if matches:
                     matches[0].append(p)
                 else:
-                    tmap[puri.hostname].append((topic, [p]))
+                    tmap[puri.hostname].append((topic, ttype, [p]))
         return tmap
         
     uricache = {}
@@ -1602,7 +1602,7 @@ def _resource_name_package(name):
         return None
     return name[:name.find('/')]
 
-def create_publisher(topic_name, topic_type, latch):
+def create_publisher(topic_name, topic_type, latch, disable_rostime=True):
     """
     Create rospy.Publisher instance from the string topic name and
     type. This is a powerful method as it allows creation of
@@ -1612,6 +1612,7 @@ def create_publisher(topic_name, topic_type, latch):
     :param topic_name: name of topic, ``str``
     :param topic_type: name of topic type, ``str``
     :param latch: latching topic, ``bool``
+    :param latch: disable_rostime: whether to disable rostime (use walltime instead), ``bool``
     :returns: topic :class:`rospy.Publisher`, :class:`Message` class
     """
     topic_name = rosgraph.names.script_resolve_name('rostopic', topic_name)
@@ -1623,7 +1624,7 @@ def create_publisher(topic_name, topic_type, latch):
         pkg = _resource_name_package(topic_type)
         raise ROSTopicException("invalid message type: %s.\nIf this is a valid message type, perhaps you need to type 'rosmake %s'"%(topic_type, pkg))
     # disable /rosout and /rostime as this causes blips in the pubsub network due to rostopic pub often exiting quickly
-    rospy.init_node('rostopic', anonymous=True, disable_rosout=True, disable_rostime=True)
+    rospy.init_node('rostopic', anonymous=True, disable_rosout=True, disable_rostime=disable_rostime)
     pub = rospy.Publisher(topic_name, msg_class, latch=latch, queue_size=100)
     return pub, msg_class
 
@@ -1746,6 +1747,8 @@ def _rostopic_cmd_pub(argv):
                       help="enable latching for -f, -r and piped input.  This latches the first message.")
     parser.add_option("-s", '--substitute-keywords', dest="substitute_keywords", default=False, action="store_true",
                       help="When publishing with a rate, performs keyword ('now' or 'auto') substitution for each message")
+    parser.add_option('--use-rostime', dest="use_rostime", default=False, action="store_true",
+                      help="use rostime for time stamps, else walltime is used")
     #parser.add_option("-p", '--param', dest="parameter", metavar='/PARAM', default=None,
     #                  help="read args from ROS parameter (Bagy format)")
     
@@ -1770,16 +1773,16 @@ def _rostopic_cmd_pub(argv):
         parser.error("topic type must be specified")
     if 0:
         if len(args) > 2 and options.parameter:
-            parser.error("args confict with -p setting")        
+            parser.error("args conflict with -p setting")        
     if len(args) > 2 and options.file:
-        parser.error("args confict with -f setting")        
+        parser.error("args conflict with -f setting")        
     topic_name, topic_type = args[0], args[1]
 
     # type-case using YAML
     try:
         pub_args = []
         for arg in args[2:]:
-            pub_args.append(yaml.load(arg))
+            pub_args.append(yaml.safe_load(arg))
     except Exception as e:
         parser.error("Argument error: "+str(e))
 
@@ -1789,7 +1792,7 @@ def _rostopic_cmd_pub(argv):
 
     # if no rate, or explicit latch, we latch
     latch = (rate == None) or options.latch
-    pub, msg_class = create_publisher(topic_name, topic_type, latch)
+    pub, msg_class = create_publisher(topic_name, topic_type, latch, disable_rostime=not options.use_rostime)
 
     if 0 and options.parameter:
         param_name = rosgraph.names.script_resolve_name('rostopic', options.parameter)
@@ -1822,7 +1825,7 @@ def file_yaml_arg(filename):
         try:
             with open(filename, 'r') as f:
                 # load all documents
-                data = yaml.load_all(f)
+                data = yaml.safe_load_all(f)
                 for d in data:
                     yield [d]
         except yaml.YAMLError as e:
@@ -2014,7 +2017,7 @@ def stdin_yaml_arg():
 
             if arg.strip() == '---': # End of document
                 try:
-                    loaded = yaml.load(buff.rstrip())
+                    loaded = yaml.safe_load(buff.rstrip())
                 except Exception as e:
                     sys.stderr.write("Invalid YAML: %s\n"%str(e))
                 if loaded is not None:
